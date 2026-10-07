@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>定時音檔播放與錄音控制台</title>
+    <!-- 引入 Tailwind CSS 快速排版 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 p-6">
+
+    <div class="max-w-4xl mx-auto space-y-6">
+        <h1 class="text-2xl font-bold flex items-center gap-2">
+            🕒 定時音檔播放與錄音控制台
+        </h1>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            <!-- 1. 現場錄音工作室 -->
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 space-y-4">
+                <h2 class="text-lg font-semibold text-rose-400">🎙️ 現場錄音工作室</h2>
+                <div id="timerDisplay" class="text-3xl font-mono text-center bg-slate-900 py-3 rounded-lg">00:00</div>
+                <div class="flex gap-2">
+                    <button id="recordBtn" onclick="toggleRecord()" class="flex-1 bg-rose-600 hover:bg-rose-500 py-2 rounded-lg font-medium">開始錄音</button>
+                </div>
+                <audio id="audioPlayback" controls class="w-full hidden"></audio>
+            </div>
+
+            <!-- 2. 新增定時播放任務 -->
+            <div class="bg-slate-800 p-5 rounded-xl border border-slate-700 space-y-4">
+                <h2 class="text-lg font-semibold text-emerald-400">➕ 新增定時播放任務</h2>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">音訊網址 (支援直連 MP3 / Vocaroo)</label>
+                    <input type="text" id="audioUrl" placeholder="https://..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">設定播放時間</label>
+                    <input type="datetime-local" id="targetTime" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm">
+                </div>
+                <button onclick="addSchedule()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-2 rounded-lg font-medium">設定並插入播放任務</button>
+            </div>
+
+        </div>
+
+        <!-- 3. 預定播放清單 -->
+        <div class="bg-slate-800 p-5 rounded-xl border border-slate-700">
+            <h2 class="text-lg font-semibold mb-3">📋 預定播放清單</h2>
+            <div id="playlist" class="text-sm text-slate-400">目前尚無排程任務...</div>
+        </div>
+    </div>
+
+    <!-- 隱藏播放器 -->
+    <audio id="scheduledAudio"></audio>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+        let schedules = [];
+
+        // 簡易錄音邏輯
+        async function toggleRecord() {
+            const btn = document.getElementById('recordBtn');
+            const playback = document.getElementById('audioPlayback');
+            
+            if (!isRecording) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+                    
+                    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                    mediaRecorder.onstop = () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/mp3' });
+                        const audioUrl = URL.createObjectURL(audioBlob);
+                        playback.src = audioUrl;
+                        playback.classList.remove('hidden');
+                    };
+                    
+                    mediaRecorder.start();
+                    isRecording = true;
+                    btn.textContent = "結束錄音";
+                    btn.classList.replace('bg-rose-600', 'bg-slate-600');
+                } catch (err) {
+                    alert("無法存取麥克風，請檢查權限！");
+                }
+            } else {
+                mediaRecorder.stop();
+                isRecording = false;
+                btn.textContent = "開始錄音";
+                btn.classList.replace('bg-slate-600', 'bg-rose-600');
+            }
+        }
+
+        // 新增排程任務
+        function addSchedule() {
+            const url = document.getElementById('audioUrl').value;
+            const time = document.getElementById('targetTime').value;
+            
+            if (!url || !time) {
+                alert("請填寫完整的音訊網址與播放時間！");
+                return;
+            }
+
+            schedules.push({ url, time, triggered: false });
+            updatePlaylistUI();
+            alert("排程設定成功！");
+        }
+
+        function updatePlaylistUI() {
+            const list = document.getElementById('playlist');
+            if (schedules.length === 0) {
+                list.innerHTML = "目前尚無排程任務...";
+                return;
+            }
+            list.innerHTML = schedules.map((s, idx) => `
+                <div class="flex justify-between items-center bg-slate-900 p-3 rounded-lg mb-2">
+                    <div>時間：${s.time} | 來源：${s.url}</div>
+                    <div class="text-emerald-400">${s.triggered ? '已播放'計時中...'}</div>
+                </div>
+            `).join('');
+        }
+
+        // 每秒檢查一次是否到達播放時間
+        setInterval(() => {
+            const now = new Date();
+            schedules.forEach(s => {
+                if (!s.triggered) {
+                    const target = new Date(s.time);
+                    if (now >= target) {
+                        s.triggered = true;
+                        const player = document.getElementById('scheduledAudio');
+                        // 轉換 Vocaroo 或直接播放
+                        let playUrl = s.url;
+                        if (playUrl.includes('voca.ro/')) {
+                            const code = playUrl.split('/').pop();
+                            playUrl = `https://media.vocaroo.com/mp3/${code}`;
+                        }
+                        player.src = playUrl;
+                        player.play().catch(e => console.log("自動播放被瀏覽器阻擋，需點擊互動"));
+                        updatePlaylistUI();
+                    }
+                }
+            });
+        }, 1000);
+    </script>
+</body>
+</html>
